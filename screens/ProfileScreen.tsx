@@ -1,72 +1,104 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Image } from 'react-native';
+import {
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  TextInput, Alert, Image,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useApp } from '../AppContext';
-import { User } from '../types/navigation';
+import { supabase } from '../utils/supabaseClient';
+import { useApp, User } from '../AppContext';
 
 export default function ProfileScreen({ navigation }: any) {
   const { theme, isDarkMode, toggleTheme, currentUser, setCurrentUser, schedule, tasks, grades } = useApp();
+  const [userInfo, setUserInfo] = useState<User | null>(currentUser);
+  const [saving, setSaving] = useState(false);
 
-  const displayUser: User = currentUser || {
-    name: 'Robhie Angel D. Sevilleno',
-    studentId: '2024-02479',
-    course: 'BS Information Systems',
-    section: '2A',
-    email: 'demo@example.com',
-    password: 'demo123',
-    photo: null,
-  };
+  if (!userInfo) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.background }}>
+        <Text style={{ color: theme.textSecondary }}>Loading profile...</Text>
+      </View>
+    );
+  }
 
-  const [userInfo, setUserInfo] = useState<User>({ ...displayUser });
-
-  const initials = displayUser.name
+  // Initials from first + last word of name
+  const initials = userInfo.name
     .split(' ')
     .filter((_: any, i: number, a: any[]) => i === 0 || i === a.length - 1)
     .map((w: string) => w[0])
     .join('')
     .toUpperCase();
 
-  const totalUnits = schedule.reduce((s: number, c: any) => s + (c.units || 0), 0);
-  const completedGrades = grades.filter((g: any) => g.gwa !== null);
+  const totalUnits = schedule.reduce((s, c) => s + (c.units || 0), 0);
+  const completedGrades = grades.filter(g => g.gwa !== null);
   const avgGWA =
     completedGrades.length > 0
-      ? (completedGrades.reduce((s: number, g: any) => s + (g.gwa || 0), 0) / completedGrades.length).toFixed(2)
+      ? (completedGrades.reduce((s, g) => s + (g.gwa || 0), 0) / completedGrades.length).toFixed(2)
       : '—';
 
   const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure?', [
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: async () => { await setCurrentUser(null); navigation.replace('Login'); } },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          await setCurrentUser(null); // clears context + calls supabase.auth.signOut()
+          navigation.replace('Login');
+        },
+      },
     ]);
   };
 
   const handleChange = (field: keyof User, value: string) => {
-    setUserInfo({ ...userInfo, [field]: value });
+    setUserInfo(prev => prev ? { ...prev, [field]: value } : null);
   };
 
-  const handleSave = () => {
-    setCurrentUser(userInfo);
-    Alert.alert('Saved', 'Your profile has been updated.');
+  const handleSave = async () => {
+    if (!userInfo) return;
+    setSaving(true);
+
+    const { error } = await supabase
+      .from('users')
+      .update({
+        name: userInfo.name,
+        email: userInfo.email,
+        student_id: userInfo.studentId,
+        course: userInfo.course,
+        section: userInfo.section,
+        photo: userInfo.photo || null,
+      })
+      .eq('id', userInfo.id);   // ← uses the auth user's ID correctly
+
+    setSaving(false);
+
+    if (error) {
+      Alert.alert('Error', error.message);
+    } else {
+      await setCurrentUser(userInfo); // update context
+      Alert.alert('Saved', 'Your profile has been updated.');
+    }
   };
 
-const pickImage = async () => {
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: 'images', // lowercase 'images'
-    quality: 1,
-    allowsEditing: true,
-    aspect: [1, 1], // square crop
-  });
-
-  if (!result.canceled) {
-    setUserInfo({ ...userInfo, photo: result.assets[0].uri });
-  }
-};
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (!result.canceled) {
+      setUserInfo(prev => prev ? { ...prev, photo: result.assets[0].uri } : null);
+    }
+  };
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: theme.background }]}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* ── Hero ── */}
       <View style={[styles.hero, { backgroundColor: theme.primary }]}>
-        <View style={styles.heroDecor} />
         <TouchableOpacity style={[styles.avatar, { borderColor: 'rgba(255,255,255,0.3)' }]} onPress={pickImage}>
           {userInfo.photo ? (
             <Image source={{ uri: userInfo.photo }} style={styles.avatarImage} />
@@ -74,21 +106,28 @@ const pickImage = async () => {
             <Text style={styles.avatarText}>{initials}</Text>
           )}
           <View style={styles.cameraIcon}>
-            <Ionicons name="camera" size={16} color="#fff" />
+            <Ionicons name="camera" size={14} color="#fff" />
           </View>
         </TouchableOpacity>
-        <Text style={styles.heroName}>{displayUser.name}</Text>
-        <Text style={styles.heroId}>{displayUser.studentId}</Text>
+
+        <Text style={styles.heroName}>{userInfo.name}</Text>
+        <Text style={styles.heroId}>{userInfo.studentId}</Text>
+
         <View style={styles.heroBadgeRow}>
-          <View style={styles.heroBadge}><Text style={styles.heroBadgeText}>{displayUser.course}</Text></View>
-          <View style={styles.heroBadge}><Text style={styles.heroBadgeText}>Section {displayUser.section}</Text></View>
+          <View style={styles.heroBadge}>
+            <Text style={styles.heroBadgeText}>{userInfo.course}</Text>
+          </View>
+          <View style={styles.heroBadge}>
+            <Text style={styles.heroBadgeText}>Section {userInfo.section}</Text>
+          </View>
         </View>
+
         <View style={styles.heroStats}>
           {[
             { label: 'Units', value: totalUnits },
             { label: 'Subjects', value: schedule.length },
             { label: 'GWA', value: avgGWA },
-            { label: 'Tasks', value: tasks.filter((t: any) => t.status !== 'completed').length },
+            { label: 'Tasks', value: tasks.filter(t => t.status !== 'completed').length },
           ].map((s, i) => (
             <View key={i} style={styles.heroStat}>
               <Text style={styles.heroStatVal}>{s.value}</Text>
@@ -99,6 +138,7 @@ const pickImage = async () => {
       </View>
 
       <View style={styles.body}>
+        {/* ── Account Info ── */}
         <View style={[styles.card, { backgroundColor: theme.surface }]}>
           <Text style={[styles.cardTitle, { color: theme.text }]}>Account Information</Text>
           {[
@@ -118,15 +158,22 @@ const pickImage = async () => {
               <TextInput
                 style={[styles.infoValue, { color: theme.text }]}
                 value={userInfo[item.field as keyof User] as string}
-                onChangeText={(t) => handleChange(item.field as keyof User, t)}
+                onChangeText={t => handleChange(item.field as keyof User, t)}
               />
             </View>
           ))}
-          <TouchableOpacity onPress={handleSave} style={styles.saveBtn}>
-            <Text style={styles.saveText}>Save Changes</Text>
+
+          <TouchableOpacity
+            onPress={handleSave}
+            style={[styles.saveBtn, { opacity: saving ? 0.7 : 1 }]}
+            disabled={saving}
+          >
+            <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
+            <Text style={styles.saveText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
           </TouchableOpacity>
         </View>
 
+        {/* ── Preferences ── */}
         <View style={[styles.card, { backgroundColor: theme.surface }]}>
           <Text style={[styles.cardTitle, { color: theme.text }]}>Preferences</Text>
           <TouchableOpacity style={[styles.prefRow, { borderBottomColor: theme.border }]} onPress={toggleTheme}>
@@ -142,6 +189,7 @@ const pickImage = async () => {
           </TouchableOpacity>
         </View>
 
+        {/* ── Sign Out ── */}
         <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
           <Ionicons name="log-out-outline" size={18} color="#EF4444" />
           <Text style={styles.signOutText}>Sign Out</Text>
@@ -154,7 +202,6 @@ const pickImage = async () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   hero: { paddingTop: 60, paddingBottom: 28, paddingHorizontal: 20, alignItems: 'center', borderBottomLeftRadius: 32, borderBottomRightRadius: 32, overflow: 'hidden' },
-  heroDecor: { position: 'absolute', top: -50, right: -50, width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(255,255,255,0.08)' },
   avatar: { width: 90, height: 90, borderRadius: 45, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', marginBottom: 14, borderWidth: 3 },
   avatarImage: { width: 90, height: 90, borderRadius: 45 },
   cameraIcon: { position: 'absolute', bottom: -2, right: -2, backgroundColor: '#6366F1', padding: 4, borderRadius: 12 },
@@ -175,8 +222,8 @@ const styles = StyleSheet.create({
   infoLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   infoIcon: { width: 28, height: 28, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
   infoLabel: { fontSize: 13 },
-  infoValue: { fontSize: 13, fontWeight: '700', maxWidth: 200, textAlign: 'right' },
-  saveBtn: { marginTop: 14, padding: 12, backgroundColor: '#4ADE80', borderRadius: 12, alignItems: 'center' },
+  infoValue: { fontSize: 13, fontWeight: '700', maxWidth: 180, textAlign: 'right' },
+  saveBtn: { marginTop: 14, padding: 12, backgroundColor: '#10B981', borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
   saveText: { fontWeight: '700', color: '#fff' },
   prefRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1 },
   prefLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },

@@ -1,112 +1,126 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, ScrollView, Image } from 'react-native';
+import React from 'react';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../AppContext';
-import { storage } from '../utils/storage';
 
-export default function LoginScreen({ navigation }: any) {
-  const { theme, setCurrentUser } = useApp();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading] = useState(false);
+// ── Screens ──────────────────────────────────────────────────────────────────
+import SplashScreen   from '../screens/SplashScreen';
+import LoginScreen    from '../screens/LoginScreen';
+import SignUpScreen   from '../screens/SignUpScreen';
+import DashboardScreen from '../screens/DashboardScreen';
+import TasksScreen    from '../screens/TasksScreen';
+import TaskDetailScreen from '../screens/TaskDetailScreen';
+import AddTaskScreen  from '../screens/AddTaskScreen';
+import ScheduleScreen from '../screens/ScheduleScreen';
+import AddClassScreen from '../screens/AddClassScreen';
+import GradesScreen   from '../screens/GradesScreen';
+import ProfileScreen  from '../screens/ProfileScreen';
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Missing Fields', 'Please fill in all fields.');
-      return;
-    }
-    setLoading(true);
-    await new Promise(r => setTimeout(r, 800));
+const Stack = createNativeStackNavigator();
+const Tab   = createBottomTabNavigator();
 
-    const users = await storage.getUsers();
-    const user = users.find(u => u.email === email.trim().toLowerCase());
-    if (!user || user.password !== password) {
-      Alert.alert('Login Failed', 'Invalid email or password.');
-    } else {
-      await setCurrentUser(user); // save current user in context + storage
-      Alert.alert('Welcome', `Hello ${user.name}!`);
-      navigation.replace('Main'); // go to bottom tab navigator
-    }
-
-    setLoading(false);
-  };
+// ── Bottom Tab Navigator ──────────────────────────────────────────────────────
+function MainTabs() {
+  const { theme } = useApp();
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={[styles.container, { backgroundColor: theme.background }]}
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: theme.surface,
+          borderTopColor: theme.border,
+          paddingBottom: 6,
+          paddingTop: 6,
+          height: 62,
+        },
+        tabBarActiveTintColor: theme.primary,
+        tabBarInactiveTintColor: theme.textSecondary,
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
+        tabBarIcon: ({ color, size, focused }) => {
+          const icons: Record<string, { active: any; inactive: any }> = {
+            Dashboard: { active: 'home',          inactive: 'home-outline' },
+            Tasks:     { active: 'checkbox',      inactive: 'checkbox-outline' },
+            Schedule:  { active: 'calendar',      inactive: 'calendar-outline' },
+            Grades:    { active: 'bar-chart',     inactive: 'bar-chart-outline' },
+            Profile:   { active: 'person-circle', inactive: 'person-circle-outline' },
+          };
+          const icon = icons[route.name];
+          return (
+            <Ionicons
+              name={focused ? icon?.active : icon?.inactive}
+              size={size}
+              color={color}
+            />
+          );
+        },
+      })}
     >
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ padding: 24, paddingBottom: 40, alignItems: 'center', paddingTop: 60 }}
-      >
-        <Image
-          source={require('../assets/studentplanner_logo.png')}
-          style={{ width: 140, height: 140 }}
-          resizeMode="contain"
-        />
-        <Text style={[styles.logoText, { color: theme.text, marginBottom: 20 }]}>Student Planner</Text>
-
-        <Text style={[styles.title, { color: theme.text }]}>Welcome Back</Text>
-        <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Sign in to continue</Text>
-
-        <View style={[styles.form, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Email Address</Text>
-          <View style={[styles.inputWrap, { borderColor: theme.border, backgroundColor: theme.surfaceAlt, marginBottom: 14 }]}>
-            <TextInput
-              style={[styles.input, { color: theme.text }]}
-              placeholder="your@email.com"
-              placeholderTextColor={theme.textSecondary + '80'}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-          </View>
-
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Password</Text>
-          <View style={[styles.inputWrap, { borderColor: theme.border, backgroundColor: theme.surfaceAlt, marginBottom: 20 }]}>
-            <TextInput
-              style={[styles.input, { color: theme.text }]}
-              placeholder="Enter password"
-              placeholderTextColor={theme.textSecondary + '80'}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry={!showPass}
-            />
-            <TouchableOpacity onPress={() => setShowPass(!showPass)}>
-              <Ionicons name={showPass ? 'eye-off-outline' : 'eye-outline'} size={18} color={theme.textSecondary} />
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity
-            style={[styles.loginBtn, { backgroundColor: theme.primary, opacity: loading ? 0.75 : 1 }]}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            <Ionicons name="log-in-outline" size={18} color="#fff" />
-            <Text style={styles.loginBtnText}>{loading ? 'Signing In...' : 'Sign In'}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => navigation.replace('SignUp')} style={{ marginTop: 16 }}>
-            <Text style={{ color: theme.primary, fontWeight: '600' }}>Create a new account</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      <Tab.Screen name="Dashboard" component={DashboardScreen} />
+      <Tab.Screen name="Tasks"     component={TasksStack} />
+      <Tab.Screen name="Schedule"  component={ScheduleStack} />
+      <Tab.Screen name="Grades"    component={GradesScreen} />
+      <Tab.Screen name="Profile"   component={ProfileScreen} />
+    </Tab.Navigator>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  logoText: { fontSize: 20, fontWeight: '700' },
-  title: { fontSize: 28, fontWeight: '800', marginBottom: 4 },
-  subtitle: { fontSize: 14, marginBottom: 24 },
-  form: { borderRadius: 24, padding: 20, elevation: 3, width: '100%' },
-  label: { fontSize: 11, fontWeight: '700', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
-  inputWrap: { flexDirection: 'row', alignItems: 'center', borderRadius: 10, borderWidth: 1.5, paddingHorizontal: 14, height: 48, gap: 8 },
-  input: { flex: 1, fontSize: 14 },
-  loginBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: 14, gap: 8, elevation: 4 },
-  loginBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-});
+// ── Tasks Stack ───────────────────────────────────────────────────────────────
+function TasksStack() {
+  const { theme } = useApp();
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="TasksList"   component={TasksScreen} />
+      <Stack.Screen name="TaskDetail"  component={TaskDetailScreen}
+        options={{
+          headerShown: true,
+          title: 'Task Details',
+          headerStyle: { backgroundColor: theme.surface },
+          headerTintColor: theme.text,
+          headerTitleStyle: { fontWeight: '800' },
+        }}
+      />
+      <Stack.Screen name="AddTask" component={AddTaskScreen}
+        options={{
+          headerShown: true,
+          title: 'Add Task',
+          headerStyle: { backgroundColor: theme.surface },
+          headerTintColor: theme.text,
+          headerTitleStyle: { fontWeight: '800' },
+        }}
+      />
+    </Stack.Navigator>
+  );
+}
+
+// ── Schedule Stack ────────────────────────────────────────────────────────────
+function ScheduleStack() {
+  const { theme } = useApp();
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ScheduleList" component={ScheduleScreen} />
+      <Stack.Screen name="AddClass" component={AddClassScreen}
+        options={{
+          headerShown: true,
+          title: 'Add Class',
+          headerStyle: { backgroundColor: theme.surface },
+          headerTintColor: theme.text,
+          headerTitleStyle: { fontWeight: '800' },
+        }}
+      />
+    </Stack.Navigator>
+  );
+}
+
+// ── Root Stack ────────────────────────────────────────────────────────────────
+export default function AppNavigator() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Splash"  component={SplashScreen} />
+      <Stack.Screen name="Login"   component={LoginScreen} />
+      <Stack.Screen name="SignUp"  component={SignUpScreen} />
+      <Stack.Screen name="Main"    component={MainTabs} />
+    </Stack.Navigator>
+  );
+}

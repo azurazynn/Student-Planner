@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../AppContext';
-import { Grade } from '../types/navigation';
 import ProgressBar from '../components/ProgressBar';
 import { SUBJECT_COLORS } from '../constants/Colors';
 
@@ -53,44 +52,65 @@ const gradeProgress = (gwa: number | null) => {
 };
 
 export default function GradesScreen() {
-  const { theme, grades, setGrades } = useApp();
+  const { theme, grades, setGrades, schedule } = useApp();
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [midVal, setMidVal] = useState('');
-  const [finVal, setFinVal] = useState('');
+  const [selectedGradeType, setSelectedGradeType] = useState<'midterm' | 'final' | null>(null);
+  const [gradeValue, setGradeValue] = useState('');
 
-  const openEdit = (g: Grade) => {
-    setEditingId(g.id);
-    setMidVal(g.midterm?.toString() || '');
-    setFinVal(g.final?.toString() || '');
+  // ✅ FIX: Build a lookup map from schedule so each grade row can show
+  //         the subject name and code even if the grades object lacks them.
+  const scheduleMap = React.useMemo(() => {
+    const map: Record<string, { subject: string; subjectCode: string; units: number }> = {};
+    schedule.forEach(c => {
+      // Key by schedule id — grades are expected to share the same id as schedule entries
+      map[c.id] = { subject: c.subject, subjectCode: c.subjectCode, units: c.units };
+    });
+    return map;
+  }, [schedule]);
+
+  // ✅ FIX: Helper to safely get subject info — prefer fields on the grade object
+  //         itself (if they exist), then fall back to the schedule lookup.
+  const getSubjectInfo = (g: any) => {
+    const fromSchedule = scheduleMap[g.id] ?? {};
+    return {
+      subject:     g.subject     || fromSchedule.subject     || 'No Subject Name',
+      subjectCode: g.subjectCode || fromSchedule.subjectCode || '—',
+      units:       g.units       ?? fromSchedule.units       ?? 0,
+    };
   };
 
-  const saveEdit = () => {
-    if (!editingId) return;
-    const mid = midVal ? parseFloat(midVal) : null;
-    const fin = finVal ? parseFloat(finVal) : null;
+  const openAddGrade = (id: string) => {
+    setEditingId(id);
+    setSelectedGradeType(null);
+    setGradeValue('');
+  };
 
-    if (mid !== null && (mid < 1.0 || mid > 5.0)) {
+  const saveGrade = () => {
+    if (!editingId || !selectedGradeType) return;
+
+    const value = parseFloat(gradeValue);
+    if (isNaN(value) || value < 1.0 || value > 5.0) {
       Alert.alert('Invalid', 'Grade must be between 1.0 and 5.0.');
       return;
     }
-    if (fin !== null && (fin < 1.0 || fin > 5.0)) {
-      Alert.alert('Invalid', 'Grade must be between 1.0 and 5.0.');
-      return;
-    }
 
-    const avg = mid !== null && fin !== null ? (mid + fin) / 2 : mid ?? null;
-    const gwa = avg !== null ? avg : null;
+    setGrades(grades.map(g => {
+      if (g.id === editingId) {
+        const newMid = selectedGradeType === 'midterm' ? value : g.midterm;
+        const newFin = selectedGradeType === 'final' ? value : g.final;
+        const avg = newMid !== null && newFin !== null ? (newMid + newFin) / 2 : newMid ?? null;
+        return { ...g, midterm: newMid, final: newFin, gwa: avg };
+      }
+      return g;
+    }));
 
-    setGrades(
-      grades.map(g =>
-        g.id === editingId ? { ...g, midterm: mid, final: fin, gwa } : g
-      )
-    );
     setEditingId(null);
+    setSelectedGradeType(null);
+    setGradeValue('');
   };
 
   const completedGrades = grades.filter(g => g.gwa !== null);
-  const totalUnits = grades.reduce((s, g) => s + g.units, 0);
+  const totalUnits = grades.reduce((s, g) => s + (getSubjectInfo(g).units), 0);
   const overallGWA =
     completedGrades.length > 0
       ? (completedGrades.reduce((s, g) => s + (g.gwa || 0), 0) / completedGrades.length).toFixed(2)
@@ -106,8 +126,13 @@ export default function GradesScreen() {
       : null
     : null;
 
+  // ✅ FIX: The editing grade's display info
+  const editingGrade = grades.find(g => g.id === editingId);
+  const editingInfo  = editingGrade ? getSubjectInfo(editingGrade) : null;
+
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
+      {/* Header */}
       <View style={[styles.header, { backgroundColor: theme.primary }]}>
         <View style={styles.headerDecor} />
         <Text style={styles.headerTitle}>Grades & GWA</Text>
@@ -131,101 +156,136 @@ export default function GradesScreen() {
         </View>
       </View>
 
+      {/* Grades List */}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 14, paddingBottom: 100 }}>
-        <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>TAP A SUBJECT TO ENTER GRADES</Text>
-        {grades.map((g, i) => {
-          const accent = SUBJECT_COLORS[i % SUBJECT_COLORS.length];
-          const gc = gwaColor(g.gwa);
-          const progress = gradeProgress(g.gwa);
+        {grades.length === 0 ? (
+          // ✅ FIX: Friendly empty state when no schedule/grades exist yet
+          <View style={[styles.emptyBox, { backgroundColor: theme.surface }]}>
+            <Ionicons name="school-outline" size={40} color={theme.textSecondary + '60'} />
+            <Text style={[styles.emptyTitle, { color: theme.text }]}>No Subjects Yet</Text>
+            <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
+              Add classes in your Schedule tab — they'll appear here automatically.
+            </Text>
+          </View>
+        ) : (
+          <>
+            <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>TAP A SUBJECT TO ENTER GRADES</Text>
+            {grades.map((g, i) => {
+              const accent = SUBJECT_COLORS[i % SUBJECT_COLORS.length];
+              const gc = gwaColor(g.gwa);
+              const progress = gradeProgress(g.gwa);
+              // ✅ FIX: Use helper so subject / code always resolves
+              const { subject, subjectCode } = getSubjectInfo(g);
 
-          return (
-            <TouchableOpacity
-              key={g.id}
-              style={[styles.gradeCard, { backgroundColor: theme.surface, borderLeftColor: accent }]}
-              onPress={() => openEdit(g)}
-              activeOpacity={0.8}
-            >
-              <View style={styles.gradeTop}>
-                <View style={{ flex: 1 }}>
-                  <View style={[styles.codeChip, { backgroundColor: accent + '18' }]}>
-                    <Text style={[styles.codeText, { color: accent }]}>{g.subjectCode}</Text>
-                    <View style={[styles.unitBadge, { backgroundColor: accent + '30' }]}>
-                      <Text style={[styles.unitText, { color: accent }]}>{g.units}u</Text>
+              return (
+                <View key={g.id} style={[styles.gradeCard, { backgroundColor: theme.surface, borderLeftColor: accent }]}>
+                  <View style={styles.gradeTop}>
+                    <View style={{ flex: 1 }}>
+                      {/* Subject Code */}
+                      <View style={[styles.codeChip, { backgroundColor: accent + '18' }]}>
+                        <Text style={[styles.codeText, { color: accent }]}>{subjectCode}</Text>
+                      </View>
+                      {/* Subject Name */}
+                      <Text style={[styles.subjectName, { color: theme.text }]} numberOfLines={2}>
+                        {subject}
+                      </Text>
                     </View>
+                    <TouchableOpacity onPress={() => openAddGrade(g.id)}>
+                      <View style={[styles.gwaCircle, { backgroundColor: g.gwa ? gc + '18' : theme.border, borderColor: g.gwa ? gc + '40' : theme.border }]}>
+                        {g.gwa ? (
+                          <>
+                            <Text style={[styles.gwaVal, { color: gc }]}>{g.gwa.toFixed(2)}</Text>
+                            <Text style={[styles.gwaLabel, { color: gc }]}>GWA</Text>
+                          </>
+                        ) : (
+                          <>
+                            <Ionicons name="add-outline" size={20} color={theme.textSecondary} />
+                            <Text style={[styles.gwaLabel, { color: theme.textSecondary }]}>Add</Text>
+                          </>
+                        )}
+                      </View>
+                    </TouchableOpacity>
                   </View>
-                  <Text style={[styles.subjectName, { color: theme.text }]} numberOfLines={2}>{g.subject}</Text>
-                </View>
-                {g.gwa !== null ? (
-                  <View style={[styles.gwaCircle, { backgroundColor: gc + '18', borderColor: gc + '40' }]}>
-                    <Text style={[styles.gwaVal, { color: gc }]}>{g.gwa.toFixed(2)}</Text>
-                    <Text style={[styles.gwaLabel, { color: gc }]}>GWA</Text>
-                  </View>
-                ) : (
-                  <View style={[styles.gwaCircle, { backgroundColor: theme.border, borderColor: theme.border }]}>
-                    <Ionicons name="pencil-outline" size={16} color={theme.textSecondary} />
-                    <Text style={[styles.gwaLabel, { color: theme.textSecondary }]}>Enter</Text>
-                  </View>
-                )}
-              </View>
-              <View style={[styles.gradesRow, { borderTopColor: theme.border }]}>
-                {[
-                  { label: 'Midterm', val: g.midterm },
-                  { label: 'Final', val: g.final },
-                  {
-                    label: 'Average',
-                    val:
-                      g.midterm !== null && g.final !== null
+
+                  {/* Grades Row */}
+                  <View style={[styles.gradesRow, { borderTopColor: theme.border }]}>
+                    {[{ label: 'Midterm', val: g.midterm }, { label: 'Final', val: g.final }, {
+                      label: 'Average',
+                      val: g.midterm !== null && g.final !== null
                         ? ((g.midterm + g.final) / 2).toFixed(2)
                         : g.midterm ?? null,
-                  },
-                ].map(({ label, val }) => (
-                  <View key={label} style={styles.gradeBox}>
-                    <Text style={[styles.gradeBoxLabel, { color: theme.textSecondary }]}>{label}</Text>
-                    <Text style={[styles.gradeBoxVal, { color: val !== null ? theme.text : theme.textSecondary + '60' }]}>{val !== null ? val : '—'}</Text>
+                    }].map(({ label, val }) => (
+                      <View key={label} style={styles.gradeBox}>
+                        <Text style={[styles.gradeBoxLabel, { color: theme.textSecondary }]}>{label}</Text>
+                        <Text style={[styles.gradeBoxVal, { color: val !== null ? theme.text : theme.textSecondary + '60' }]}>
+                          {val !== null ? val : '—'}
+                        </Text>
+                      </View>
+                    ))}
                   </View>
-                ))}
-              </View>
-              {progress > 0 && (
-                <View style={{ marginHorizontal: 14, marginBottom: 12 }}>
-                  <ProgressBar progress={progress} color={accent} height={4} duration={1000} backgroundColor={theme.border} />
+
+                  {/* Progress Bar */}
+                  {progress > 0 && (
+                    <View style={{ marginHorizontal: 14, marginBottom: 12 }}>
+                      <ProgressBar progress={progress} color={accent} height={4} duration={1000} backgroundColor={theme.border} />
+                    </View>
+                  )}
                 </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
+              );
+            })}
+          </>
+        )}
       </ScrollView>
 
+      {/* Modal */}
       <Modal visible={editingId !== null} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: theme.surface }]}>
-            <Text style={[styles.modalTitle, { color: theme.text }]}>{grades.find(g => g.id === editingId)?.subjectCode || ''}</Text>
-            <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]} numberOfLines={2}>{grades.find(g => g.id === editingId)?.subject || ''}</Text>
-            <Text style={[styles.label, { color: theme.textSecondary, marginTop: 16 }]}>Midterm Grade (1.0–5.0)</Text>
-            <TextInput
-              style={[styles.modalInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.surfaceAlt }]}
-              placeholder="e.g., 1.25"
-              placeholderTextColor={theme.textSecondary}
-              value={midVal}
-              onChangeText={setMidVal}
-              keyboardType="numeric"
-            />
-            <Text style={[styles.label, { color: theme.textSecondary, marginTop: 12 }]}>Final Grade (1.0–5.0)</Text>
-            <TextInput
-              style={[styles.modalInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.surfaceAlt }]}
-              placeholder="e.g., 1.5"
-              placeholderTextColor={theme.textSecondary}
-              value={finVal}
-              onChangeText={setFinVal}
-              keyboardType="numeric"
-            />
-            <View style={styles.modalBtns}>
-              <TouchableOpacity style={[styles.modalCancelBtn, { borderColor: theme.border }]} onPress={() => setEditingId(null)}>
-                <Text style={[styles.modalCancelText, { color: theme.textSecondary }]}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalSaveBtn, { backgroundColor: theme.primary }]} onPress={saveEdit}>
-                <Text style={styles.modalSaveText}>Save</Text>
-              </TouchableOpacity>
-            </View>
+            {/* ✅ FIX: Use resolved editingInfo instead of direct g.subjectCode */}
+            <Text style={[styles.modalTitle, { color: theme.text }]}>
+              {editingInfo?.subjectCode ?? '—'}
+            </Text>
+            <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]} numberOfLines={2}>
+              {editingInfo?.subject ?? 'No Subject Name'}
+            </Text>
+
+            {!selectedGradeType ? (
+              <>
+                <Text style={[styles.label, { color: theme.textSecondary, marginTop: 16 }]}>Select Grade Type</Text>
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+                  <TouchableOpacity style={[styles.modalSaveBtn, { flex: 1, backgroundColor: theme.primary }]} onPress={() => setSelectedGradeType('midterm')}>
+                    <Text style={styles.modalSaveText}>Midterm</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.modalSaveBtn, { flex: 1, backgroundColor: theme.primary }]} onPress={() => setSelectedGradeType('final')}>
+                    <Text style={styles.modalSaveText}>Final</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.label, { color: theme.textSecondary, marginTop: 16 }]}>
+                  Enter {selectedGradeType.charAt(0).toUpperCase() + selectedGradeType.slice(1)} Grade
+                </Text>
+                <TextInput
+                  style={[styles.modalInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.surfaceAlt }]}
+                  placeholder="e.g., 1.25"
+                  placeholderTextColor={theme.textSecondary}
+                  value={gradeValue}
+                  onChangeText={setGradeValue}
+                  keyboardType="numeric"
+                  autoFocus
+                />
+
+                <View style={styles.modalBtns}>
+                  <TouchableOpacity style={[styles.modalCancelBtn, { borderColor: theme.border }]} onPress={() => setEditingId(null)}>
+                    <Text style={[styles.modalCancelText, { color: theme.textSecondary }]}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.modalSaveBtn, { backgroundColor: theme.primary }]} onPress={saveGrade}>
+                    <Text style={styles.modalSaveText}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -250,8 +310,6 @@ const styles = StyleSheet.create({
   gradeTop: { flexDirection: 'row', padding: 14, paddingBottom: 8, gap: 12, alignItems: 'flex-start' },
   codeChip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, gap: 6, marginBottom: 6 },
   codeText: { fontSize: 11, fontWeight: '800' },
-  unitBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  unitText: { fontSize: 10, fontWeight: '700' },
   subjectName: { fontSize: 14, fontWeight: '700', lineHeight: 19 },
   gwaCircle: { width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', borderWidth: 2 },
   gwaVal: { fontSize: 16, fontWeight: '900' },
@@ -271,4 +329,7 @@ const styles = StyleSheet.create({
   modalCancelText: { fontWeight: '700' },
   modalSaveBtn: { flex: 2, height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center', elevation: 4 },
   modalSaveText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  emptyBox: { borderRadius: 20, padding: 40, alignItems: 'center', gap: 10, marginTop: 20 },
+  emptyTitle: { fontSize: 18, fontWeight: '800' },
+  emptySubtitle: { fontSize: 13, textAlign: 'center', lineHeight: 20 },
 });

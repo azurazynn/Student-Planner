@@ -156,6 +156,14 @@ export default function DashboardScreen({ navigation }: any) {
     ? (completedGrades.reduce((sum, g) => sum + (g.gwa || 0), 0) / completedGrades.length).toFixed(2)
     : '—';
 
+  // ✅ FIX: Navigate to Tasks tab first, then to TaskDetail screen inside its stack
+  const handleTaskPress = (taskId: string) => {
+    navigation.navigate('Tasks', {
+      screen: 'TaskDetail',
+      params: { taskId },
+    });
+  };
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: theme.background }]}
@@ -276,8 +284,11 @@ export default function DashboardScreen({ navigation }: any) {
           </View>
           {tasks.filter(t => t.status !== 'completed').slice(0, 3).map(task => (
             <TaskCard
-              key={task.id} task={task} theme={theme}
-              onPress={() => navigation.navigate('TaskDetail', { taskId: task.id })}
+              key={task.id}
+              task={task}
+              theme={theme}
+              // ✅ FIX: Navigate into the Tasks stack's TaskDetail screen
+              onPress={() => handleTaskPress(task.id)}
             />
           ))}
           {tasks.filter(t => t.status !== 'completed').length === 0 && (
